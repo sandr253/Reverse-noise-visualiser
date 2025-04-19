@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reverse Noise Visualizer</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      overflow: hidden;
+      font-family: sans-serif;
+      color: white;
+      animation: rainbow 10s linear infinite;
+    }
+
+    @keyframes rainbow {
+      0% { background-color: #ff0000; }
+      17% { background-color: #ff9900; }
+      34% { background-color: #ffff00; }
+      51% { background-color: #33cc33; }
+      68% { background-color: #3399ff; }
+      85% { background-color: #9900cc; }
+      100% { background-color: #ff0000; }
+    }
+
+    .ball {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      position: absolute;
+      background-image: url('https://em-content.zobj.net/thumbs/240/apple/354/cat-face_1f431.png');
+      background-size: cover;
+      opacity: 0.9;
+      box-shadow: 0 0 20px white;
+      animation: glitter 1s infinite alternate;
+    }
+
+    @keyframes glitter {
+      from { box-shadow: 0 0 10px white; }
+      to { box-shadow: 0 0 20px #fff, 0 0 30px #ff0, 0 0 40px #0ff; }
+    }
+
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 5vw;
+      color: red;
+      background-color: rgba(0, 0, 0, 0.6);
+      z-index: 10;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    .quote {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      max-width: 300px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 1.2em;
+      text-align: right;
+      font-style: italic;
+    }
+    .meter {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      padding: 10px;
+      border-radius: 10px;
+      font-size: 1em;
+    }
+    .confetti {
+      position: absolute;
+      width: 10px;
+      height: 10px;
+      background: hsl(var(--hue), 100%, 70%);
+      top: 0;
+      left: 50%;
+      animation: fall 3s linear forwards;
+    }
+    @keyframes fall {
+      to {
+        transform: translateY(100vh) rotate(360deg);
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="overlay" id="overlay">TOO LOUD!</div>
+  <div class="quote" id="quote">"Silence is the purr-fect melody." – Cat</div>
+  <div class="meter" id="meter">Volume: 0</div>
+  <audio id="alertSound" src="https://actions.google.com/sounds/v1/weather/thunder_crack.ogg" preload="auto"></audio>
+  <audio id="chillMusic" src="https://cdn.pixabay.com/download/audio/2022/07/30/audio_1f92a83782.mp3?filename=cozy-lofi-ambient-113681.mp3" preload="auto" loop></audio>
+  <audio id="meowSound" src="https://cdn.pixabay.com/download/audio/2021/10/20/audio_c13d79c2de.mp3?filename=cat-meow-14536.mp3" preload="auto"></audio>
+
+  <script>
+    const NUM_BALLS = 20;
+    const balls = [];
+    const alertSound = document.getElementById('alertSound');
+    const chillMusic = document.getElementById('chillMusic');
+    const meowSound = document.getElementById('meowSound');
+    const quoteEl = document.getElementById('quote');
+    let soundPlaying = false;
+    let musicStarted = false;
+    let meowTimer = 0;
+    let quietCounter = 0;
+
+    const quotes = [
+      '"Silence is the purr-fect melody." – Cat',
+      '"In a world full of noise, be a meow." – Ancient Feline Proverb',
+      '"Hush now, greatness naps." – Napoleon the Cat',
+      '"The quieter you are, the more you hear." – Whiskers Zenpaw',
+      '"Stillness is the key to tail flicks and clarity." – Meowgi'
+    ];
+
+    function changeQuote() {
+      quoteEl.textContent = quotes[Math.floor(Math.random() * quotes.length)];
+    }
+
+    function createConfetti() {
+      for (let i = 0; i < 100; i++) {
+        const c = document.createElement('div');
+        c.classList.add('confetti');
+        c.style.left = `${Math.random() * 100}vw`;
+        c.style.setProperty('--hue', Math.random() * 360);
+        document.body.appendChild(c);
+        setTimeout(() => c.remove(), 3000);
+      }
+    }
+
+    for (let i = 0; i < NUM_BALLS; i++) {
+      const ball = document.createElement('div');
+      ball.classList.add('ball');
+      document.body.appendChild(ball);
+      balls.push({
+        el: ball,
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        dx: (Math.random() - 0.5) * 4,
+        dy: (Math.random() - 0.5) * 4,
+      });
+    }
+
+    const overlay = document.getElementById('overlay');
+    const meter = document.getElementById('meter');
+
+    let audioContext;
+    let analyser;
+    let dataArray;
+
+    async function setupAudio() {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const source = audioContext.createMediaStreamSource(stream);
+
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+        source.connect(analyser);
+        animate();
+      } catch (err) {
+        alert("Microphone access is required to use this app.");
+      }
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      analyser.getByteFrequencyData(dataArray);
+      let volume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+      let quietnessFactor = Math.max(0.1, 100 - volume) / 100;
+
+      meter.textContent = `Volume: ${volume.toFixed(1)}`;
+
+      if (volume > 60) {
+        overlay.style.opacity = 1;
+        if (!soundPlaying) {
+          alertSound.currentTime = 0;
+          alertSound.play();
+          soundPlaying = true;
+        }
+        chillMusic.pause();
+        meowTimer = 0;
+        quietCounter = 0;
+      } else {
+        overlay.style.opacity = 0;
+        soundPlaying = false;
+        if (!musicStarted) {
+          chillMusic.play();
+          musicStarted = true;
+        } else if (chillMusic.paused) {
+          chillMusic.play();
+        }
+
+        meowTimer++;
+        if (meowTimer > 300) {
+          meowSound.currentTime = 0;
+          meowSound.play();
+          meowTimer = 0;
+          changeQuote();
+        }
+
+        quietCounter++;
+        if (quietCounter === 600) {
+          createConfetti();
+          quietCounter = 0;
+        }
+      }
+
+      balls.forEach(ball => {
+        ball.x += ball.dx * quietnessFactor;
+        ball.y += ball.dy * quietnessFactor;
+
+        if (ball.x < 0 || ball.x > window.innerWidth) ball.dx *= -1;
+        if (ball.y < 0 || ball.y > window.innerHeight) ball.dy *= -1;
+
+        ball.el.style.left = ball.x + 'px';
+        ball.el.style.top = ball.y + 'px';
+      });
+    }
+
+    setupAudio();
+  </script>
+</body>
+</html>
